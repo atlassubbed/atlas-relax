@@ -4,13 +4,39 @@
   "description": "A minimal, powerful declarative VDOM and reactive programming framework.",
   "scripts": {
     "test-server": "mocha --colors --watch --recursive './test/**/*.test.js'",
-    "test": "mocha --colors --recursive './test/**/*.test.js'"
+    "test": "mocha --colors --recursive './test/**/*.test.js'",
+    "perf": "npm run perf-reg && npm run perf-man && npm run perf-post",
+    "perf-reg": "node --expose-gc ./test/perf/perf-reg",
+    "perf-man": "node --expose-gc ./test/perf/perf-man",
+    "perf-post": "node --expose-gc ./test/perf/perf-post"
   },
-  "main": "./src/index.js",
-  "keywords": [],
+  "main": "./src/relax.js",
+  "keywords": [
+    "atlassubbed",
+    "relax",
+    "react",
+    "reactive",
+    "meteor",
+    "declarative",
+    "async",
+    "diffing",
+    "vdom",
+    "framework",
+    "virtual-dom",
+    "components",
+    "hyperscript",
+    "jsx",
+    "reconciliation",
+    "lifecycle",
+    "virtual",
+    "dom"
+  ],
   "author": "atlassubbed <atlassubbed@gmail.com>",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "devDependencies": {
+    "atlas-basic-timer": "^4.0.1",
+    "atlas-random": "^1.1.0",
+    "atlas-serial": "^1.0.1",
     "chai": "^4.1.2",
     "mocha": "^5.2.0"
   },
