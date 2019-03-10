@@ -2,7 +2,7 @@
 
 Relax is a minimal, powerful declarative VDOM and reactive programming framework.
 
-[![Travis](https://img.shields.io/travis/[username]/[repo].svg)](https://travis-ci.org/[username]/[repo])
+[![Travis](https://img.shields.io/travis/atlassubbed/atlas-relax.svg)](https://travis-ci.org/atlassubbed/atlas-relax)
 
 <img align="right" width="250" height="250" src="https://user-images.githubusercontent.com/38592371/54081017-120ac200-42cb-11e9-9afe-dd60f0f75fa3.gif">
 ---
