@@ -47,5 +47,11 @@
   "engines": {
     "node": "^10.1.0",
     "npm": "^6.0.1"
+  },
+  "homepage": "https://github.com/atlassubbed/atlas-relax#readme",
+  "bugs": "https://github.com/atlassubbed/atlas-relax/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/atlassubbed/atlas-relax.git"
   }
 }
