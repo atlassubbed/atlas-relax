@@ -4,32 +4,31 @@ Relax is a minimal, powerful declarative VDOM and reactive programming framework
 
 [![Travis](https://img.shields.io/travis/atlassubbed/atlas-relax.svg)](https://travis-ci.org/atlassubbed/atlas-relax)
 
-<img align="right" width="250" height="250" src="https://user-images.githubusercontent.com/38592371/54081017-120ac200-42cb-11e9-9afe-dd60f0f75fa3.gif">
-
----
+<img align="right" width="250" height="250" src="https://user-images.githubusercontent.com/38592371/54162407-be63ba00-442b-11e9-9577-02fbf627d1f6.gif">
 
 ### just relax 😌
 
 This tiny 2.5KB (.min.gz) engine lets you define data-driven apps using declarative components. Relax combines ideas from Meteor, Mithril and Preact into one general framework. Relax supports:
 
-  * Keyed JSX (e.g. `<li key="key1">`) for efficient diffing
   * **Sideways** reactive data between components done right
     * reactive computations
     * reactive variables
     * reactive providers
-  * **Fragments** and array return values from `render`
-  * Memoization as a replacement for `shouldComponentUpdate`
-  * **Fibers** for efficiently tracking work that is being redone
-  * **Scheduling** (async and sync)
-  * Rendering-agnostic apps
-    * render apps to arbitrary targets (not just the DOM)
-  * Well-established algorithms to ensure updates remain efficient (O(n)) and correct
-    * stack-safe
-    * solves the "diamond problem" (no redundant renders)
   * Managed diffs (take imperative control when automatic diffs are too expensive)
     * **rebasing** work (add or override work in a diff)
     * **coherent** batched updates
     * **decoherent** time-sliced updates (incremental rendering)
+  * **Fragments** and array return values from `render`
+  * **Fibers** for efficiently tracking work that is being redone
+  * **Scheduling** (async and sync)
+  * Keyed JSX (e.g. `<li key="key1">`) for efficient diffing
+  * Lifecycle methods/hooks
+  * Memoization as a replacement for `shouldComponentUpdate`
+  * Rendering-agnostic apps
+    * render apps to arbitrary targets (not just the DOM)
+  * Well-established DAG algorithms to ensure updates remain efficient (O(n)) and correct
+    * stack-safe
+    * atomic, solves the "diamond problem" (no redundant renders)
 
 Relax gives you what you need to build not only simple todo apps, but also rapidly-updating apps like stock tickers.
 
@@ -38,16 +37,17 @@ Relax gives you what you need to build not only simple todo apps, but also rapid
   1. **Is JSX necessary? No.**
   2. **Is Relax a view library? Yes.** Use a DOM-rendering plugin to render your app.
   3. **Is Relax a state management library? Yes.** Relax's state management primitives are powerful enough that you could implement your own MOBX/Redux/`Meteor.Tracker.autorun` in a few lines of code on top of Relax.
-  4. **Do I need Redux or MOBX? No.** Relax's reactive primitives are sufficient for the majority of apps.
+  4. **Do I need Redux or MOBX? No.** Relax's reactive primitives are sufficient for all apps.
   5. **Do I need something like React hooks? No.** Sufficient lifecycle methods are provided. If you prefer hooks (closures), you could implement React hooks on top of Relax's lifecycle methods in a few lines of code.
   6. **Do updates cause the whole app to re-render? No.** Updates scale linearly with the radius of the update, not with the total graph size. If an update only affects 5 nodes, then only those 5 nodes will get their `render` called.
-  7. **Do re-renders always update the DOM? No.** Mutations are calculated with a keyed diffing algorithm to limit interactions with the DOM. Plugins don't have to think -- Relax "tells plugins what to do".
+  7. **Do re-renders always update the DOM? No.** Mutations are calculated with a keyed diffing algorithm to limit interactions with the DOM. Plugins (DOM Renderer, SSR Renderer, etc.) don't have to think -- Relax "tells plugins what to do".
+  8. **Are there docs and demos I can read? Soon.** I'm currently working on all of that stuff.
 
 ### build your own X 
 
 Relax abstracts out the heavy lifting associated with building frameworks (reconciliation, efficient data flow propagation, reactive functions, etc.). Many frameworks can be built in a few lines of code with Relax's primitives:
   
-  * React DOM
+  * React DOM (as a plugin)
   * MOBX
   * Redux
 
@@ -74,6 +74,8 @@ If you've ever tinkered with Meteor, you've probably been obsessed with `Tracker
 ```
 npm install --save atlas-relax
 ```
+
+You are assumed to be familiar with transpiling code (babel, webpack, etc.). In the future, I may make a `dist/` folder containing various transpiled-minified code for quick installment.
 
 ### notes
 
