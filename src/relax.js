@@ -1,6 +1,68 @@
-// this file is manually unrolled
-//   * webpack's closure bundling adds .3kb to the min.gz bundle size.
-//   * in the future, I may refactor these into their own files if using rollup
+/** MINIMUM CONCEPTS -- what do the terms mean?
+    If you read the source, you'll see the word "temp", "diff", and "frame" a lot.
+    A "temp" is just a static template that describes a tree:
+
+                                        const temp = { name: App,
+        const temp = <App>                  next: {
+          <p>Hello World</p>    ===         name: "p",
+        </App>                              next: "Hello World"
+                                          }
+                                        }
+          (JSX temp)            ===       (literal temp)
+
+    Alone, temps don't do much. They're just literals. As soon as you "diff" a temp,
+    it creates a "frame" that is like a live version of your temp:
+    
+        const frame = diff(temp)
+
+    Frames are nodes in a graph that are connected together to create your app.
+    They hold your render functions, state, etc.
+
+    You can update your app (`frame`) with new "arguments" by diffing an updated temp onto it:
+
+        diff(newTemp, frame);
+
+    This "diffs" the target tree described by the `newTemp` onto the existing frame described by
+    the old temp. Remember, a temp is just a description of what a frame should look like.
+    What if you didn't pass in the old frame?:
+
+        diff(newTemp)
+
+    Then, you'd have a new instance of your app described by the `newTemp`. When you call diff with
+    both (temp, frame) arguments, you can think of it as "diffing a temp onto a frame"
+    which updates the frame efficiently so that it is consistent with the new temp.
+
+    By now, you've probably guessed how to "unmount" frames (apps):
+
+        diff(null, frame)
+
+    This makes sense, we're instructing the engine to convert our app (`frame`) into
+    the zero-frame, the frame described by a void temp. This completely destroys the app.
+
+    Those are the bare minimum concepts you need to get started playing with the framework.
+
+    The "diffs" we've been talking about so far are actually "outer diffs". We are diffing
+    temps onto frames (like slapping new props onto a node). There's another type of diff
+    called the "inner diff" which is closer to a "setState" (async) or "forceUpdate" (sync).
+
+    So far, we've been diffing in the global context, that is, not inside of a render function
+    or a hook. Managed diffs are diffs that are executed during an existing diff cycle and they
+    allow you to rebase work onto the current diff cycle. */
+
+/** META -- about the file structure
+    You might be wondering why all of this code is in a single file. I, too, wonder this.
+    Webpack probably does something like:
+      1. Figure out the files used in an app by walking import/export links from an entry point.
+      2. Wrap each file's code in a closure and expose an interface so that
+         * files' variables are in their own scope/namespace
+           so they don't interfere with other files' variables
+         * other files can access the files' contents via an interface
+      3. Link together the closures and execute them in a correct order.
+    The problem with this is that it introduces boilerplate code that scales with
+    the internal interface of your project.
+    I didn't know rollup existed (which uses a flatten & reconcile strategy), which
+    makes this a non-issue. I ended up just putting everything into a single file to
+    avoid webpack's overhead. In the future, I may refactor these into their own files. */
 
 /** BIT VECTOR
     The initial approach may be to use an enum for all possible states,
@@ -17,7 +79,7 @@
     In the example above, we have 27 "wasted" bits (denoted by X). 
     We use those for a counter to avoid making an extra counter integer. 
     Because of this, we must be careful when dealing with bit operations. 
-      1. We mustn't set state into a coerced 32 bit, or we'd lose ~21 bits of entropy for counters.
+      1. We mustn't set state into a coerced 32 bit:
           * we would lose ~21 bits of entropy for our counter bits
           * Setting bits via state |= BIT is not allowed
             * because i32s drop most sig bits
@@ -40,37 +102,49 @@ const IDLE = 0;
 const DIFF = 1;
 const LOCK = 2;
 
-// query bitmasks
-const isCtx = f => f._ph & IS_CTXL;
-const isCh = f => f._ph & IS_CHLD;
-const inPath = f => f._ph & IN_PATH;
-const isUpd = f => f._ph & HAS_EVT;
-
 // util functions
-const isFn = f => typeof f === "function";
-const norm = t => t != null && t !== true && t !== false && 
-  (typeof t === "object" ? t : {name: null, data: String(t)});
-const isFrame = f => f && isFn(f.render);
-const isAdd = f => f && isUpd(f) && !f._evt._temp;
-const sib = p => p && !isCtx(p) ? p : null;
+// query bitmasks (is the frame...)
+const isCtx = frame => frame._ph & IS_CTXL; // ...a contextual root?
+const isCh = frame => frame._ph & IS_CHLD; // ...a child?
+const inPath = frame => frame._ph & IN_PATH; // ...in the diff path?
+const isUpd = frame => frame._ph & HAS_EVT; // ...carrying an update?
+
+const isFn = frame => typeof frame === "function";
+// normalize a temp (nully and booleans are void templates and are ignored)
+const norm = temp => temp != null && temp !== true && temp !== false && 
+  (typeof temp === "object" ? temp : {name: null, data: String(temp)});
+const isFrame = frame => frame && isFn(frame.render);
+// does the frame have an update and is it mounting for the first time?
+const isAdd = frame => frame && isUpd(frame) && !frame._evt._temp;
+// convert a frame to a black (real) child, or null if red (contextual root)
+const sib = frame => frame && !isCtx(frame) ? frame : null;
 
 // aux data structures
-const lags = [], orph = [], rems = [], stx = [], path = [], post = [], field = new Map;
+const laggards = [],
+  orphans = [],
+  removals = [],
+  stack = [],
+  path = [],
+  afterFlush = [],
+  field = new Map;
 
 // flatten and sanitize a frame's next children
-//   * if ix then index the nodes' implicit/explicit keys
-const clean = (t, ix, next=[]) => {
-  stx.push(t);
-  while(stx.length) if (t = norm(stx.pop()))
-    if (Array.isArray(t)) for (t of t) stx.push(t);
-    else next.push(t), ix && pushIndex(t)
+//   * optionally index the nodes' implicit/explicit keys
+//   * pass index here as opposed to referring to global since we don't always index
+//   * we also reuse `raw` here for brevity
+//   * for (k of k) caches the ref to k, then reuses it as an iter var
+const clean = (raw, index, next=[]) => {
+  stack.push(raw);
+  while(stack.length) if (raw = norm(stack.pop()))
+    if (Array.isArray(raw)) for (raw of raw) stack.push(raw);
+    else next.push(raw), index && pushIndex(raw)
   return next
 }
 // emit mutation event to plugins
-const emit = (evt, type, f, p, s, ps) => {
+const emit = (evt, type, frame, par, nextPrevSib, prevSib) => {
   if (Array.isArray(evt)) for (evt of evt)
-    evt[type] && evt[type](f, p, s, ps);
-  else evt[type] && evt[type](f, p, s, ps);   
+    evt[type] && evt[type](frame, par, nextPrevSib, prevSib);
+  else evt[type] && evt[type](frame, par, nextPrevSib, prevSib);   
 }
 
 // not to be instantiated by caller
@@ -111,37 +185,43 @@ Frame.prototype = {
     return temp.next;
   },
   // rarely called, use sets for sublinearity
-  sub(f){
-    isFrame(f) && f !== this && (f.affs = f.affs || new Set).add(this)
+  sub(affectorFrame){
+    isFrame(affectorFrame) &&
+    affectorFrame !== this &&
+    (affectorFrame.affs = affectorFrame.affs || new Set).add(this);
   },
-  unsub(f){
-    isFrame(f) && f.affs && f.affs.delete(this) && (f.affs.size || (f.affs = null))
+  unsub(affectorFrame){
+    isFrame(affectorFrame) &&
+    affectorFrame.affs &&
+    affectorFrame.affs.delete(this) &&
+    (affectorFrame.affs.size || (affectorFrame.affs = null));
   },
   // instance (inner) diff (schedule updates for frames)
   diff(tau=-1){
-    return on < LOCK && !!this.temp &&
+    return diffState < LOCK && !!this.temp &&
       !(!isFn(tau) && tau < 0 ?
-        (on ? rebasePath : sidediff)(pushPath(this)) :
-        excite(this, tau, isFn(tau) && tau))
+        (diffState ? rebasePath : sidediff)(pushPath(this)) :
+        excite(this, tau))
   }
 }
 
-// on = {0: not diffing, 1: diffing, 2: cannot rebase or schedule diff}
-let head, tail, on = IDLE, ctx = null, keys = new Map;
+let firstLeader, lastLeader, diffState = IDLE, context = null, keys = new Map;
 
-// KEY INDEXER
-// indexes explicit and implicit keys in LIFO order
-const pushIndex = (t, ix, k) => {
-  (ix = keys.get(k = t.name)) || keys.set(k, ix = {});
-  (k = t.key) ?
-    ((ix = ix.exp = ix.exp || {})[k] = t) :
-    (ix.imp = ix.imp || []).push(t);
+/** KEY INDEXER
+    * indexes explicit and implicit keys in LIFO order
+    * `key` refers to a cache field, not necessarily a JSX (template) "key".
+    * e.g. the name of your component (div, App) is essentially an implicit key. */
+const pushIndex = (temp, cache, key) => {
+  (cache = keys.get(key = temp.name)) || keys.set(key, cache = {});
+  (key = temp.key) ?
+    ((cache = cache.exp = cache.exp || {})[key] = temp) :
+    (cache.imp = cache.imp || []).push(temp);
 }
-const popIndex = (t, ix, k) =>
-  (ix = keys.get(t.name)) &&
-    ((k = t.key) ?
-      ((ix = ix.exp) && (t = ix[k])) && (ix[k] = null, t) :
-      (ix=ix.imp) && ix.pop())
+const popIndex = (temp, cache, key) =>
+  (cache = keys.get(temp.name)) &&
+    ((key = temp.key) ?
+      ((cache = cache.exp) && (temp = cache[key])) && (cache[key] = null, temp) :
+      (cache=cache.imp) && cache.pop())
 
 /** FIBER -- A 'fiber' is linked list of contiguous child chains.
     Motivation: 
@@ -190,74 +270,98 @@ const popIndex = (t, ix, k) =>
       5. unmounts are processed immediately
       6. subtree mounts are processed before the next sibling */
 // add leader node to fiber
-const pushLeader = f => {
-  if (!head) head = tail = f;
-  else (tail._evt._top = f)._evt._bot = tail, tail = f;
+const pushLeader = frame => {
+  if (!firstLeader)
+    firstLeader = lastLeader = frame;
+  else {
+    (lastLeader._evt._top = frame)._evt._bot = lastLeader;
+    lastLeader = frame;
+  }
 }
 // remove leader node from fiber
-const popLeader = (ns, f, e=ns._evt, b=e._bot, t=e._top) => {
-  if (f ? (f._evt._bot = b) : b) b._evt._top = f || t, e._bot = null;
-  else head = f || t;
-  if (f ? (f._evt._top = t) : t) t._evt._bot = f || b, e._top = null;
-  else tail = f || b;
+const popLeader = (
+  oldLeader,
+  newLeader,
+  event=oldLeader._evt,
+  prevLeader=event._bot,
+  nextLeader=event._top
+) => {
+  if (newLeader ? (newLeader._evt._bot = prevLeader) : prevLeader)
+    prevLeader._evt._top = newLeader || nextLeader, event._bot = null;
+  else firstLeader = newLeader || nextLeader;
+  if (newLeader ? (newLeader._evt._top = nextLeader) : nextLeader)
+    nextLeader._evt._bot = newLeader || prevLeader, event._top = null;
+  else lastLeader = newLeader || prevLeader;
 }
-const queue = (f, s, ns) => {
-  if (!s || !isUpd(s)){
-    if (!ns || !isUpd(ns)) pushLeader(f);
-    else popLeader(ns, f);
+const queue = (frame, prevSib, nextSib) => {
+  if (!prevSib || !isUpd(prevSib)){
+    if (!nextSib || !isUpd(nextSib)) pushLeader(frame);
+    else popLeader(nextSib, frame);
   }
 }
-const dequeue = (f, s, ns=f.sib) => {
-  if (isUpd(f)){
-    if (!s || !isUpd(s)) popLeader(f, ns && isUpd(ns) && ns)
-  } else if (s && isUpd(s) && ns && isUpd(ns)) popLeader(ns);
+const dequeue = (frame, prevSib, nextSib=frame.sib) => {
+  if (isUpd(frame)){
+    if (!prevSib || !isUpd(prevSib))
+      popLeader(frame, nextSib && isUpd(nextSib) && nextSib)
+  } else if (prevSib && isUpd(prevSib) && nextSib && isUpd(nextSib))
+      popLeader(nextSib);
 }
 // detach event f after sibling s
-const unlinkEvent = (f, p, s=f._prev, next) => {
-  (next = f._sib) && (next._evt._prev = s);
-  s ? (s._evt._sib = next) : (p._next = next);
+const unlinkEvent = (event, parEvent, prevSib=event._prev, nextSib) => {
+  (nextSib = event._sib) && (nextSib._evt._prev = prevSib);
+  prevSib ? (prevSib._evt._sib = nextSib) : (parEvent._next = nextSib);
 }
 // attach event f after sibling s
-const linkEvent = (e, f, p, s, next) => {
-  (next = e._sib = (e._prev = s) ? s._evt._sib : p._next) && (next._evt._prev = f);
-  s ? (s._evt._sib = f) : (p._next = f)
+const linkEvent = (event, frame, parEvent, prevSib, nextSib) => {
+  (nextSib = event._sib =
+    (event._prev = prevSib) ?
+      prevSib._evt._sib :
+      parEvent._next
+  ) && (nextSib._evt._prev = frame);
+  prevSib ? (prevSib._evt._sib = frame) : (parEvent._next = frame)
 }
 // empties the fiber, emitting the queued events
-const flushEvents = (c, f, e, p, owner) => {
-  if (rems.length) {
-    while(f = rems[c++]){
-      f.cleanup && f.cleanup(f);
-      if (e = f._evt) emit(e._evt, "remove", f, e._next, e._prev, e._temp, f._evt = null);
+const flushEvents = (c, frame, event, parent, owner) => {
+  if (removals.length) {
+    while(frame = removals[c++]){
+      frame.cleanup && frame.cleanup(frame);
+      if (event = frame._evt) emit(
+        event._evt,
+        "remove",
+        frame, event._next, event._prev, event._temp, frame._evt = null
+      );
     }
-    rems.length = 0;
+    removals.length = 0;
   }
-  if (!(f = head)) return;
-  owner = f.par;
-  while(f) {
-    p = f.par;
-    if (isUpd(f)){
-      f._ph -= HAS_EVT, e = f._evt;
-      if (!e._temp){
-        c = sib(f);
-        emit(e._evt, "add", f, c && p, c && f.prev, f.temp);
-        if (c && p) linkEvent(e, f, p._evt, sib(f.prev));
-        if (sib(f.next)){
-          f = f.next;
+  if (!(frame = firstLeader)) return;
+  owner = frame.par;
+  while(frame) {
+    parent = frame.par;
+    if (isUpd(frame)){
+      frame._ph -= HAS_EVT, event = frame._evt;
+      if (!event._temp){
+        c = sib(frame);
+        emit(event._evt, "add", frame, c && parent, c && frame.prev, frame.temp);
+        if (c && parent) linkEvent(event, frame, parent._evt, sib(frame.prev));
+        if (sib(frame.next)){
+          frame = frame.next;
           continue;
         }
       } else {
-        if (f.temp !== e._temp) emit(e._evt, "temp", f, f.temp, e._temp);
-        if ((c = sib(f.prev)) !== e._prev){
-          emit(e._evt, "move", f, p, e._prev, c);
-          unlinkEvent(e, p._evt), linkEvent(e, f, p._evt, c);
+        if (frame.temp !== event._temp)
+          emit(event._evt, "temp", frame, frame.temp, event._temp);
+        if ((c = sib(frame.prev)) !== event._prev){
+          emit(event._evt, "move", frame, parent, event._prev, c);
+          unlinkEvent(event, parent._evt);
+          linkEvent(event, frame, parent._evt, c);
         }
-        e._temp = null;
+        event._temp = null;
       }
     }
-    if (p !== owner) f = f.sib || p;
-    else if (!sib(f) || !(f = f.sib) || !isUpd(f)){
-      popLeader(head);
-      if (f = head) owner = f.par;
+    if (parent !== owner) frame = frame.sib || parent;
+    else if (!sib(frame) || !(frame = frame.sib) || !isUpd(frame)){
+      popLeader(firstLeader);
+      if (frame = firstLeader) owner = frame.par;
     }
   }
 }
@@ -280,27 +384,32 @@ const flushEvents = (c, f, e, p, owner) => {
             * emission causes other nodes of the same frequency to collapse into their new state */
 
 // remove a node from an oscillator
-const relax = (f, tau, t) => {
-  if (t = f._top){
-    if (t._bot = f._bot) f._bot._top = t;
-    else if (t.tau !== tau && t === field.get(t.tau))
-      (t.clear || clearTimeout)(t.timer), field.delete(t.tau);
-    f._top = f._bot = null;
+const relax = (frame, tau, prevFrame) => {
+  if (prevFrame = frame._top){
+    if (prevFrame._bot = frame._bot)
+      frame._bot._top = prevFrame;
+    else if (prevFrame.tau !== tau && prevFrame === field.get(prevFrame.tau)){
+      (prevFrame.clear || clearTimeout)(prevFrame.timer);
+      field.delete(prevFrame.tau);
+    }
+    frame._top = frame._bot = null;
   }
 }
 // add/move a node to an oscillator
-const excite = (f, tau, cb, t) => {
-  relax(f, tau);
-  if (t = field.get(tau)){
-    if (t._bot) (f._bot = t._bot)._top = f;
+const excite = (frame, tau, fieldHead) => {
+  relax(frame, tau);
+  if (fieldHead = field.get(tau)){
+    if (fieldHead._bot)
+      (frame._bot = fieldHead._bot)._top = frame;
   } else {
-    field.set(tau, t = {tau});
-    t.timer = (cb || setTimeout)(() => {
-      while(t = t._bot) pushPath(t);
+    field.set(tau, fieldHead = {tau});
+    fieldHead.timer = (isFn(tau) ? tau : setTimeout)(() => {
+      while(fieldHead = fieldHead._bot)
+        pushPath(fieldHead);
       sidediff(field.delete(tau));
-    }, tau, t);
+    }, tau, fieldHead);
   }
-  (f._top = t)._bot = f;
+  (frame._top = fieldHead)._bot = frame;
 }
 
 /** SEG-LIST - List structure that stores children nodes under their parents.
@@ -321,73 +430,102 @@ const excite = (f, tau, cb, t) => {
     We don't implement a new class here, instead we write methods which act on children objects.
     These methods allow adding (linking) and removing (unlinking) colored child nodes from a parent.
     Every node is a parent who has segregated children nodes. */
-const linkNodeAfter = (f, s, n=s.sib) =>
-  (((f.prev = s).sib = f).sib = n) && (n.prev = f);
-const linkNodeBefore = (f, s, n=s.prev) =>
-  (((f.sib = s).prev = f).prev = n) && (n.sib = f);
-// attach node f into seg-list p after sibling s
-const linkNode = (f, p, s=null) => {
-  if (!isCtx(f) && s) return linkNodeAfter(f, s);
-  if (s = p.next) (isCtx(s) ? linkNodeAfter : linkNodeBefore)(f, s);
-  if (!isCtx(f) || !s || isCtx(s)) p.next = f;
+const linkNodeAfter = (frame, prevSib, nextSib=prevSib.sib) =>
+  (((frame.prev = prevSib).sib = frame).sib = nextSib) &&
+  (nextSib.prev = frame);
+const linkNodeBefore = (frame, nextSib, prevSib=nextSib.prev) =>
+  (((frame.sib = nextSib).prev = frame).prev = prevSib) &&
+  (prevSib.sib = frame);
+// attach frame into seg-list after prevSib
+const linkNode = (frame, parent, prevSib=null) => {
+  if (!isCtx(frame) && prevSib)
+    return linkNodeAfter(frame, prevSib);
+  if (prevSib = parent.next)
+    (isCtx(prevSib) ? linkNodeAfter : linkNodeBefore)(frame, prevSib);
+  if (!isCtx(frame) || !prevSib || isCtx(prevSib))
+    parent.next = frame;
 }
-// detach node f from seg-list p after sibling s
-const unlinkNode = (f, p, s=null, n=f.sib) => {
-  if (n) n.prev = s;
-  if (s) s.sib = n;
-  if (f === p.next) p.next = n || s
+// detach frame from seg-list after prevSib
+const unlinkNode = (frame, parent, prevSib=null, nextSib=frame.sib) => {
+  if (nextSib) nextSib.prev = prevSib;
+  if (prevSib) prevSib.sib = nextSib;
+  if (frame === parent.next)
+    parent.next = nextSib || prevSib;
 }
 
 // MUTATIONS
-const add = (t, p, s, isRoot, isF, evt) => {
-  if (t){
-    isF = isFrame(p), evt = isF ? p._evt && p._evt._evt : p, on = LOCK;
-    if (!isFn(t.name)) t = new Frame(t, evt);
+const add = (temp, parent, prevSib, isRoot, isF, evt) => {
+  if (temp){
+    isF = isFrame(parent);
+    evt = isF ? parent._evt && parent._evt._evt : parent, diffState = LOCK;
+    if (!isFn(temp.name))
+      temp = new Frame(temp, evt);
     else {
-      const Sub = t.name;
-      if (isFrame(Sub.prototype)) t = new Sub(t, evt);
-      else t = new Frame(t, evt), t.render = Sub;
+      const Sub = temp.name;
+      if (isFrame(Sub.prototype))
+        temp = new Sub(temp, evt);
+      else {
+        temp = new Frame(temp, evt)
+        temp.render = Sub;
+      }
     }
     // step counter
-    t._st = 0;
+    temp._st = 0;
     // phase and in degree counter
-    t._ph = IN_PATH | (evt ? HAS_EVT : 0) | (isRoot ? (!isF && IS_CTXL) : IS_CHLD)
-    p = t.par = isF ? p : ctx, on = DIFF;
-    if (t._evt) sib(t) ? isAdd(p) || queue(t, s, s ? s.sib : sib(p && p.next)) : pushLeader(t);
-    p && linkNode(t, p, s);
-    isRoot ? lags.push(t) : stx.push(t);
-    return t;
+    temp._ph = IN_PATH |
+      (evt ? HAS_EVT : 0) |
+      (isRoot ? (!isF && IS_CTXL) : IS_CHLD)
+    parent = temp.par = isF ? parent : context, diffState = DIFF;
+    if (temp._evt) sib(temp) ?
+      isAdd(parent) || queue(temp, prevSib, prevSib ?
+        prevSib.sib :
+        sib(parent && parent.next)
+      ) :
+      pushLeader(temp);
+    parent && linkNode(temp, parent, prevSib);
+    isRoot ? laggards.push(temp) : stack.push(temp);
+    return temp;
   }
 }
-const move = (f, p, s, ps=sib(f.prev), e=f._evt) => {
-  if (e){
-    isAdd(p) || dequeue(f, ps);
-    if (!isUpd(f)) e._temp = f.temp, f._ph += HAS_EVT;
-    isAdd(p) || queue(f, s, s ? s.sib : sib(p && p.next));
+const move = (frame, parent, nextPrevSib, prevSib=sib(frame.prev), event=frame._evt) => {
+  if (event){
+    isAdd(parent) || dequeue(frame, prevSib);
+    if (!isUpd(frame))
+      event._temp = frame.temp, frame._ph += HAS_EVT;
+    isAdd(parent) || queue(frame, nextPrevSib, nextPrevSib ?
+      nextPrevSib.sib :
+      sib(parent && parent.next)
+    );
   }
-  unlinkNode(f, p, f.prev), linkNode(f, p, s);
+  unlinkNode(frame, parent, frame.prev);
+  linkNode(frame, parent, nextPrevSib);
 }
-const receive = (f, t, e=f._evt) => {
-  if (e && !isUpd(f)){
-    sib(f) ? queue(f, sib(f.prev), f.sib) : pushLeader(f)
-    e._temp = f.temp, f._ph += HAS_EVT;
+const receive = (frame, nextTemp, event=frame._evt) => {
+  if (event && !isUpd(frame)){
+    sib(frame) ?
+      queue(frame, sib(frame.prev), frame.sib) :
+      pushLeader(frame)
+    event._temp = frame.temp;
+    frame._ph += HAS_EVT;
   }
-  f.temp = t;
+  frame.temp = nextTemp;
 }
-const remove = (f, p, s, e=f._evt) => {
-  if (e) {
-    if (!isUpd(f) || e._temp){
-      rems.push(f)
-      e._temp = e._temp || f.temp;
-      if (e._next = sib(f) && p)
-        p.temp && unlinkEvent(e, p._evt);
-    } else if (f.cleanup) rems.push(f)
-    sib(f) ? isAdd(p) || dequeue(f, sib(s)) : isUpd(f) && popLeader(f);
-    if (isUpd(f)) f._ph -= HAS_EVT
-  } else if (f.cleanup) rems.push(f);
-  p && p.temp && unlinkNode(f, p, s);
-  if (!inPath(f)) f._ph += IN_PATH
-  relax(f, f.temp = f.affs = f._affs = null)
+const remove = (frame, parent, prevSib, event=frame._evt) => {
+  if (event) {
+    if (!isUpd(frame) || event._temp){
+      removals.push(frame)
+      event._temp = event._temp || frame.temp;
+      if (event._next = sib(frame) && parent)
+        parent.temp && unlinkEvent(event, parent._evt);
+    } else if (frame.cleanup) removals.push(frame)
+    sib(frame) ?
+      isAdd(parent) || dequeue(frame, sib(prevSib)) :
+      isUpd(frame) && popLeader(frame);
+    if (isUpd(frame)) frame._ph -= HAS_EVT
+  } else if (frame.cleanup) removals.push(frame);
+  parent && parent.temp && unlinkNode(frame, parent, prevSib);
+  if (!inPath(frame)) frame._ph += IN_PATH
+  relax(frame, frame.temp = frame.affs = frame._affs = null)
 }
 
 /** PATH - A stack of nodes to be diffed.
@@ -396,29 +534,32 @@ const remove = (f, p, s, e=f._evt) => {
       * nodes added to the path are candidates for a diff "strike"
       * they do not necessarily get diffed
       * whether or not a node gets diffed is impossible to know before executing the full diff
-      * the leader is stored in the "path" stack, "stx" is used as an auxiliary stack
-    for stack safety, we acquire overhead trying to simulate recursion's post ordering */
-const rebasePath = (f, i, ch) => {
-  const walkAffs = i => i.temp ? ch.push(i) : i.unsub(f);
-  while(i = stx.length)
-    if (inPath(f = stx[i-1])) stx.pop();
-    else if (f._st){
-      if (i = --f._st) {
-        if ((i = f._affs[i-1])._st)
+      * the leader is stored in the "path" stack, "stack" is used as an auxiliary stack
+    for stack safety, we acquire overhead trying to simulate recursion's afterFlush ordering */
+const rebasePath = (frame, i, ch) => {
+  const walkAffs = affect => affect.temp ?
+    ch.push(affect) :
+    affect.unsub(frame);
+  while(i = stack.length)
+    if (inPath(frame = stack[i-1])) stack.pop();
+    else if (frame._st){
+      if (i = --frame._st) {
+        if ((i = frame._affs[i-1])._st)
           throw new Error("cycle")
         pushPath(i);
-      } else f._ph += IN_PATH, path.push(stx.pop());
+      } else frame._ph += IN_PATH, path.push(stack.pop());
     } else {
-      if (f._st++, ((i = f.next) && isCh(i)) || f.affs){
-        if (ch = f._affs = [], i && isCh(i))
+      if (frame._st++, ((i = frame.next) && isCh(i)) || frame.affs){
+        if (ch = frame._affs = [], i && isCh(i))
           do ch.push(i); while(i = i.sib);
-        if (i = f.affs) i.forEach(walkAffs)
-        f._st += ch.length;
+        if (i = frame.affs) i.forEach(walkAffs)
+        frame._st += ch.length;
       }
     }
 }
-const pushPath = f => {
-  inPath(f) || stx.push(f), f._ph+=ORDER
+const pushPath = frame => {
+  inPath(frame) || stack.push(frame);
+  frame._ph+=ORDER;
 }
 
 /** DIFF CYCLE
@@ -446,12 +587,12 @@ const pushPath = f => {
       This framework takes a different approach to things like createContext or ContextProviders.
       We don't want to have special types of nodes that can inject data into trees, and we don't want
       to fluff our trees up with provider components. Instead, nodes are first class citizens when it
-      comes to data flow. Any node can subscribe to any other node's changes. This amounts to creating
-      edges in the graph that transcend the implicit tree structure.
+      comes to data flow. Any node can subscribe to any other node's changes.
+      This amounts to creating edges in the graph that transcend the implicit tree structure.
       
-      You can mount several orthogonal trees and establish dependencies between them via subscriptions. 
-      This is referred to as having "sideways" data dependencies. Instead of bringing state "up",
-      often the natural thing to do is to bring state "out" or "sideways".
+      You can mount several orthogonal trees and establish dependencies between them
+      via subscriptions. This is referred to as having "sideways" data dependencies. 
+      Instead of bringing state "up", often the natural thing to do is to bring it "out"/"sideways".
 
     Diff cycles in depth:
       10,000 foot: 
@@ -502,8 +643,9 @@ const pushPath = f => {
 
       Lifecycle methods:
         Often, applications will need to execute code during a render cycle. 
-        We want to minimize the number of lifecycle methods, because we want to minimize the number of
-        places that user-defined code can run, without taking away power. We need only three methods:
+        We want to minimize the number of lifecycle methods, because we want to minimize
+        the number of places that user-defined code can run, without taking away power. 
+        We need only three methods:
           1. render
           2. rendered (think componentDidMount, componentDidUpdate)
           3. cleanup (think componentDidUnmount)
@@ -549,7 +691,7 @@ const pushPath = f => {
             rebase any number of times to extend the path (thus extending this phase)
           C (flush):
             emit squashed mutations (e.g. update the DOM)
-          D (post-flush):
+          D (afterFlush-flush):
             call rendered/cleanup lifecycle fns, if any, optionally calling
             rebasing any number of times to extend the diff cycle with another subcycle
             (going back to phase B)
@@ -578,96 +720,127 @@ const pushPath = f => {
                    thus every new mount is guaranteed to have latest state
                  * rebase work to extend this render phase. */
 // unmount queued orphan nodes
-const unmount = (f=orph.pop(), isRoot, c, p, s) => {
-  while(f){
-    p = f.par, s = f.prev;
-    if (f.temp){ // entering "recursion"
-      if (isRoot && (c = f.affs)) c.forEach(pushPath)
-      remove(f, p, s);
-      if (c = f.next) while(c.sib) c = c.sib;
-      if (c) {
-        f = c;
+const unmount = (frame=orphans.pop(), isRoot, child, parent, prevSib) => {
+  while(frame){
+    parent = frame.par, prevSib = frame.prev;
+    if (frame.temp){ // entering "recursion"
+      if (isRoot && (child = frame.affs))
+        child.forEach(pushPath)
+      remove(frame, parent, prevSib);
+      if (child = frame.next)
+        while(child.sib) child = child.sib;
+      if (child) {
+        frame = child;
         continue;
       }
     }
-    c = !(p && p.temp) && (s || p);
-    f.sib = f.par = f.prev = f.next = null;
-    f = c || orph.pop();
+    child = !(parent && parent.temp) && (prevSib || parent);
+    frame.sib = frame.par = frame.prev = frame.next = null;
+    frame = child || orphans.pop();
   }
 }
 // mount under a node that has no children
-const mount = (f, next, c) => {
-  while(c = add(next.pop(), f, c));
-  while(c = stx.pop()) lags.push(c);
+const mount = (parent, nextChildren, child) => {
+  while(child = add(nextChildren.pop(), parent, child));
+  while(child = stack.pop())
+    laggards.push(child);
 }
 // diff "downwards" from a node
-const subdiff = (p, c, next, i, n) => {
-  if (next.length){
-    do (n = popIndex(c.temp)) ?
-      n === (n.p = c).temp ? ((c._ph-=ORDER) < ORDER) && (c._ph -= IN_PATH) : receive(c, n) :
-      orph.push(c); while(c = c.sib); unmount();
-    for(i = p.next; i && (n = next.pop());)
-      (c = n.p) ?
-        (n.p = null, i === c) ?
-          (i = i.sib) :
-          move(c, p, sib(i.prev)) :
-        add(n, p, sib(i.prev));
-    mount(p, next, c), keys = new Map;
+const subdiff = (parent, child, nextChildren, curChild, nextTemp) => {
+  if (nextChildren.length){
+    do (nextTemp = popIndex(child.temp)) ?
+      nextTemp === (nextTemp.p = child).temp ?
+        ((child._ph-=ORDER) < ORDER) && (child._ph -= IN_PATH) :
+        receive(child, nextTemp) :
+      orphans.push(child);
+    while(child = child.sib);
+    unmount();
+    for(curChild = parent.next; curChild && (nextTemp = nextChildren.pop());)
+      (child = nextTemp.p) ?
+        (nextTemp.p = null, curChild === child) ?
+          (curChild = curChild.sib) :
+          move(child, parent, sib(curChild.prev)) :
+        add(nextTemp, parent, sib(curChild.prev));
+    mount(parent, nextChildren, child);
+    keys = new Map;
   } else {
-    do orph.push(c); while(c = c.sib); unmount();
+    do orphans.push(child);
+    while(child = child.sib);
+    unmount();
   }
 }
 // diff "sideways" across the path
-const sidediff = (c, raw=rebasePath(on=DIFF)) => {
+const sidediff = (c, raw=rebasePath(diffState=DIFF)) => {
   do {
-    if (ctx = path.pop() || lags.pop()){
-      if (!inPath(ctx)) {
-        if (c = ctx._affs) {
+    if (context = path.pop() || laggards.pop()){
+      if (!inPath(context)) {
+        if (c = context._affs) {
           for (c of c) ((c._ph-=ORDER) < ORDER) && (c._ph -= IN_PATH);
-          ctx._affs = null;
+          context._affs = null;
         }
-      } else if (c = ctx.temp) {
-        relax(ctx);
-        ctx._ph &= (ORDER-IN_PATH-1)
-        ctx._affs = null;
-        raw = ctx.render(c, ctx)
-        if (ctx.temp){
-          if (ctx.rendered && !(ctx._ph & IN_POST)){
-            ctx._ph += IN_POST;
-            post.push(ctx);
+      } else if (c = context.temp) {
+        relax(context);
+        context._ph &= (ORDER-IN_PATH-1)
+        context._affs = null;
+        raw = context.render(c, context)
+        if (context.temp){
+          if (context.rendered && !(context._ph & IN_POST)){
+            context._ph += IN_POST;
+            afterFlush.push(context);
           }
-          sib(c = ctx.next) ?
-            isCh(c) && subdiff(ctx, c, clean(raw, 1)) :
-            mount(ctx, clean(raw));
+          sib(c = context.next) ?
+            isCh(c) && subdiff(context, c, clean(raw, 1)) :
+            mount(context, clean(raw));
         }
       }
     } else {
-      on = LOCK, flushEvents(0);
-      if (!post.length) return on = IDLE, ctx = null;
-      on = DIFF; while(ctx = post.pop()) if (ctx.temp){
-        ctx.rendered && ctx.rendered(ctx), ctx._ph -= IN_POST
+      diffState = LOCK, flushEvents(0);
+      if (!afterFlush.length)
+        return diffState = IDLE, context = null;
+      diffState = DIFF;
+      while(context = afterFlush.pop()) if (context.temp){
+        context.rendered && context.rendered(context), context._ph -= IN_POST
       }
     }
   } while(1);
 }
-// public (outer) diff (mount, unmount and update frames)
-const diff = (t, f, p=f&&f.prev, s) => {
-  let r = false, inDiff = on, context = ctx;
-  if (inDiff < 2) try {
-    if (!Array.isArray(t = norm(t))){
-      if (!isFrame(f) || !f.temp){
-        if (t && (!s || s.par === p)) r = add(t, p, sib(s), 1)
-      } else if (!isCh(f)){
-        if (t && t.name === f.temp.name) {
-          if (t !== f.temp) receive(r = f, t, pushPath(f));
-          if (sib(f) && isFrame(s = f.par) && (!p || p.par === s)){
-            (p = sib(p)) === (s = sib(f.prev)) || move(r = f, f.par, p, s);
+/** Outer-diff (mount, unmount and update frames)
+    Mounting:
+      diff(temp)                     (mount temp)
+      diff(temp, null, plugins)      (mount temp with plugins)
+      diff(temp, null, parent)*      (mount temp under parent as a managed root)
+      diff(temp, null, parent, sib)* (mount temp under parent after sib as managed root)
+    Unmounting:
+      diff(null, frame)              (unmount (managed) frame)
+    Updating:
+      diff(temp, frame)              (update (managed) frame with new temp)
+      diff(temp, frame, sib)         (update managed frame with new temp and move after sib) 
+
+    * managed roots inherit parents' plugins */
+const diff = (temp, frame, parent=frame&&frame.prev, prevSib) => {
+  let r = false, prevDiffState = diffState, prevContext = context;
+  if (prevDiffState < LOCK) try {
+    if (!Array.isArray(temp = norm(temp))){
+      if (!isFrame(frame) || !frame.temp){
+        if (temp && (!prevSib || prevSib.par === parent))
+          r = add(temp, parent, sib(prevSib), 1);
+      } else if (!isCh(frame)){
+        if (temp && temp.name === frame.temp.name) {
+          if (temp !== frame.temp)
+            receive(r = frame, temp, pushPath(frame));
+          if (sib(frame) && isFrame(prevSib = frame.par) &&
+            (!parent || parent.par === prevSib)){
+            (parent = sib(parent)) === (prevSib = sib(frame.prev)) ||
+            move(r = frame, frame.par, parent, prevSib);
           }
-        } else if (!t) unmount(f, r = true);
+        } else if (!temp) unmount(frame, r = true);
       }
-      r && (inDiff ? rebasePath : sidediff)();
+      r && (prevDiffState ? rebasePath : sidediff)();
     }
-  } finally { on = inDiff, ctx = context }
+  } finally {
+    diffState = prevDiffState;
+    context = prevContext
+  }
   return r;
 }
 
