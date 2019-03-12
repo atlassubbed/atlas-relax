@@ -126,36 +126,29 @@ describe("subdiff", function(){
   describe("edits prev children to match next children", function(){
     bruteForceCases.forEach(({prevCases, nextCases}) => {
       prevCases.forEach((prev, j) => {
-        describe(`with prev [${prev.map(tag)}]`, function(){
+        describe(`starting with children [${prev.map(tag)}]`, function(){
           nextCases.forEach((next, i) => {
             const t2 = h(next), t1 = h(prev);
-            describe(`LCRS rendered to next [${next.map(tag)}]`, function(){
-              it("should not contain superfluous events", function(){
-                const renderer = new LCRSRenderer;
-                const f = diff(t1, null, renderer);
-                const { a: mA, r: mR, u: mU, s: mS } = renderer.counts;
-                renderer.resetCounts(), diff(t2, f);
-                const expectedTree = renderer.renderStatic(t2)
-                // add, remove, update, total N, swaps
-                const { a, r, u, n, s } = renderer.counts;
-                // mounting phase should only add nodes
-                expect(mA).to.equal(prev.length + 1);
-                expect(mR).to.equal(mU).to.equal(mS).to.equal(0)
-                 // accounts for the parent div node
-                const maxUpdates = prev.length + 1;
-                expect(u).to.be.at.most(maxUpdates);
-                expect(a).to.equal(next.length - prev.length + r); // sanity check
-                expect(r).to.equal(maxUpdates - u); // if we didn't update a node, we removed it.
-                expect(s).to.be.at.most(u - 1 + a); // we should never do more moves than this
-                expect(n).to.equal(next.length + 1) // sanity check
-              })
-              it("should edit prev to match next", function(){
-                const renderer = new LCRSRenderer;
-                const f = diff(t1, null, renderer);
-                diff(t2, f);
-                const expectedTree = renderer.renderStatic(t2)
-                expect(renderer.tree).to.deep.equal(renderer.renderStatic(t2));
-              })
+            it(`should properly LCRS render into [${next.map(tag)}]`, function(){
+              const renderer = new LCRSRenderer;
+              const f = diff(t1, null, renderer);
+              const { a: mA, r: mR, u: mU, s: mS } = renderer.counts;
+              renderer.resetCounts(), diff(t2, f);
+              const expectedTree = renderer.renderStatic(t2)
+              // add, remove, update, total N, swaps
+              const { a, r, u, n, s } = renderer.counts;
+              // mounting phase should only add nodes
+              expect(mA).to.equal(prev.length + 1);
+              expect(mR).to.equal(mU).to.equal(mS).to.equal(0)
+               // accounts for the parent div node
+              const maxUpdates = prev.length + 1;
+              expect(u).to.be.at.most(maxUpdates);
+              expect(a).to.equal(next.length - prev.length + r); // sanity check
+              expect(r).to.equal(maxUpdates - u); // if we didn't update a node, we removed it.
+              expect(s).to.be.at.most(u - 1 + a); // we should never do more moves than this
+              expect(n).to.equal(next.length + 1) // sanity check
+              // actually outputs the correct final children
+              expect(renderer.tree).to.deep.equal(expectedTree);
             })
           })
         })
