@@ -79,7 +79,7 @@ You are assumed to be familiar with transpiling code (babel, webpack, etc.). In 
 
 ### notes
 
-Relax is an experimental framework and your feedback is greatly appreciated! If Relax has piqued your interest, 👀 read the source code! I've included implementation comments for your reference. There are a few things I want to implement in the future:
+Relax is an experimental framework and your feedback is greatly appreciated! If Relax has piqued your interest 👀 then read the source code! I've included implementation comments for your reference. If you are curious how some things were implemented, check out the [development history](https://github.com/atlassubbed/history-atlas-relax). There are a few things I want to implement in the future:
 
   1. Make plugins agnostic to reducible nodes (makes DOM rendering more efficient)
   2. Error boundaries -- they're useful for larger apps.
