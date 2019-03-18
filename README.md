@@ -35,7 +35,7 @@ Relax gives you what you need to build not only simple todo apps, but also rapid
 ### FAQs 🤔
 
   1. **Is JSX necessary? No.**
-  2. **Is Relax a view library? Yes.** You can code a declarative tree and use a DOM-rendering plugin to render it to the DOM, or a String-rendering plugin to render it to HTML.
+  2. **Is Relax a view library? Yes.** You can code a declarative tree and use a [DOM-rendering plugin](https://github.com/atlassubbed/atlas-mini-dom) to render it to the DOM, or a String-rendering plugin to render it to HTML.
   3. **Is Relax a state management library? Yes.** Relax's state management primitives are powerful enough that you could implement your own MOBX/Redux/`Meteor.Tracker.autorun` in [a few lines of code](https://github.com/atlassubbed/atlas-munchlax) on top of Relax.
   4. **Do I need Redux or MOBX? No.** Relax's reactive primitives are sufficient for all apps.
   5. **Do I need something like React hooks? No.** Sufficient lifecycle methods are provided. If you prefer hooks (closures), you could implement React hooks on top of Relax's lifecycle methods in a few lines of code.
@@ -47,7 +47,7 @@ Relax gives you what you need to build not only simple todo apps, but also rapid
 
 Relax isn't a "framework", it's a small library that helps you avoid huge frameworks. Relax abstracts out the heavy lifting associated with common UI and state management tasks (reconciliation, efficient data flow propagation, reactive functions, etc.). **Build your own framework**: Many frameworks can be built in a few lines of code with Relax's primitives:
   
-  * React DOM (as a plugin)
+  * [React DOM](https://github.com/atlassubbed/atlas-mini-dom) (as a plugin)
   * [MOBX](https://github.com/atlassubbed/atlas-munchlax)
   * Redux
 
@@ -86,7 +86,7 @@ Relax is an experimental library and your feedback is greatly appreciated! If Re
      * not as easy to implement as in React, since we may generalize it to DAGs
   3. Ensure DOM renderers can properly hydrate an existing tree to decrease time-to-mount
   4. Docs, demos and examples 
-     * Basic DOM Renderer (plugin) in 20 lines of code
+     * [Basic DOM Renderer](https://github.com/atlassubbed/atlas-mini-dom) (plugin) in 20 lines of code
      * Functional [reactive framework in 20 lines of code](https://github.com/atlassubbed/atlas-munchlax)
   5. Re-roll code into modules, provide optimized `dist/` files
      * Use rollup, babel and terser to generate ready-to-use distribution payloads
