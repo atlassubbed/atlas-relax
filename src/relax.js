@@ -844,4 +844,4 @@ const diff = (temp, frame, parent=frame&&frame.prev, prevSib) => {
   return r;
 }
 
-module.exports = { Frame, diff }
+module.exports = { Frame, diff, current: () => context }
