@@ -32,6 +32,11 @@ This tiny 2.5KB (.min.gz) engine lets you define data-driven apps using declarat
 
 Relax gives you what you need to build not only simple todo apps, but also rapidly-updating apps like stock tickers.
 
+### demos
+
+  * ["Fluid" rendering priority visualized](https://github.com/atlassubbed/play-fluid-priority) 
+  * [Dynamic-interval component](https://github.com/atlassubbed/play-dynamic-polling)
+
 ### FAQs 🤔
 
   1. **Is JSX necessary? No.**
