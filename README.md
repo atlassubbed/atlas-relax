@@ -34,6 +34,7 @@ Relax gives you what you need to build not only simple todo apps, but also rapid
 
 ### demos
 
+  * [VDOM diffing visualized with force-directed graphs](https://github.com/atlassubbed/play-relax-visualized)
   * ["Fluid" rendering priority visualized](https://github.com/atlassubbed/play-fluid-priority) 
   * [Dynamic-interval component](https://github.com/atlassubbed/play-dynamic-polling)
 
