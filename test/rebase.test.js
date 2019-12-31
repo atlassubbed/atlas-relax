@@ -175,7 +175,7 @@ describe("rebasing (merging a new diff into current diff)", function(){
         diff(h(3, hooks("willAdd", f => {})), null, f);
         diff(h(4, hooks("willAdd", f => {})), null, f);
       }
-      it("should defer rendering new nodes in reverse order until all updates have run during willUpdate", function(){
+      it("should defer rendering new nodes until all updates have run during willUpdate", function(){
         const events = [], tracker = new Tracker(events);
         const temp = h(0, null, [
           h(1),
@@ -185,11 +185,11 @@ describe("rebasing (merging a new diff into current diff)", function(){
         events.length = 0; // we don't care about initial mount
         diff(copy(temp), f);
         expect(events).to.eql([
-          {wU: 0}, {wU: 1}, {wU: 2}, {wA: 4}, {wA: 3}, 
+          {wU: 0}, {wU: 1}, {wU: 2}, {wA: 3}, {wA: 4}, 
           {mWR: 0}, {mWR: 1}, {mWR: 2}, {mWA: 4}, {mWA: 3}
         ])
       })
-      it("should defer rendering new nodes in reverse order until after flush during didUpdate", function(){
+      it("should defer rendering new nodes until after flush during didUpdate", function(){
         const events = [], tracker = new Tracker(events);
         const temp = h(0, null, [
           h(1),
@@ -200,10 +200,10 @@ describe("rebasing (merging a new diff into current diff)", function(){
         diff(copy(temp), f);
         expect(events).to.eql([
           {wU: 0}, {wU: 1}, {wU: 2}, {mWR: 0}, {mWR: 1}, {mWR: 2}, {dU: 2},
-          {wA: 4}, {wA: 3}, {mWA: 4}, {mWA: 3}
+          {wA: 3}, {wA: 4}, {mWA: 4}, {mWA: 3}
         ])
       })
-      it("should immediately add new nodes in reverse order during willAdd", function(){
+      it("should immediately add new nodes during willAdd", function(){
         const events = [], tracker = new Tracker(events);
         const temp = h(0, null, [
           h(1, hooks("willAdd", f => mount(f))),
@@ -211,11 +211,11 @@ describe("rebasing (merging a new diff into current diff)", function(){
         ])
         const f = diff(temp, null, tracker);
         expect(events).to.eql([
-          {wA: 0}, {wA: 1}, {wA: 4}, {wA: 3}, {wA: 2}, 
+          {wA: 0}, {wA: 1}, {wA: 3}, {wA: 4}, {wA: 2}, 
           {mWA: 0}, {mWA: 1}, {mWA: 4}, {mWA: 3}, {mWA: 2}
         ])
       })
-      it("should defer adding new nodes in reverse order after flush during didAdd", function(){
+      it("should defer adding new nodes after flush during didAdd", function(){
         const events = [], tracker = new Tracker(events);
         const temp = h(0, null, [
           h(1, hooks("didAdd", f => mount(f))),
@@ -224,7 +224,7 @@ describe("rebasing (merging a new diff into current diff)", function(){
         const f = diff(temp, null, tracker);
         expect(events).to.eql([
           {wA: 0}, {wA: 1}, {wA: 2}, {mWA: 0}, {mWA: 1}, {mWA: 2}, {dA: 1},
-          {wA: 4}, {wA: 3}, {mWA: 4}, {mWA: 3},
+          {wA: 3}, {wA: 4}, {mWA: 4}, {mWA: 3},
         ])
       })
     })
@@ -335,7 +335,7 @@ describe("rebasing (merging a new diff into current diff)", function(){
           if (has(updateHooks, hook)) diff(copy(temp), f);
           expect(renderer.tree).to.eql(renderer.renderStatic(temp));
         })
-        it(`should mount multiple nodes in reverse call order during ${hook}`, function(){
+        it(`should mount multiple nodes during ${hook}`, function(){
           const managedIds = [1, 2, 3];
           let order = [];
           const temp = h(0, hooks(hook, f => {
@@ -345,14 +345,14 @@ describe("rebasing (merging a new diff into current diff)", function(){
           }));
           const f = diff(temp);
           if (has(updateHooks, hook)) diff(copy(temp), f);
-          expect(order).to.eql([3,2,1])
+          expect(order).to.eql([1,2,3])
         })
       })
       const mount = tracker => {
         diff(h(3, hooks("willAdd", f => {})), null, tracker);
         diff(h(4, hooks("willAdd", f => {})), null, tracker);
       }
-      it("should defer rendering new nodes in reverse order until all updates have run during willUpdate", function(){
+      it("should defer rendering new nodes until all updates have run during willUpdate", function(){
         const events = [], tracker = new Tracker(events);
         const temp = h(0, null, [
           h(1),
@@ -362,11 +362,11 @@ describe("rebasing (merging a new diff into current diff)", function(){
         events.length = 0; // we don't care about initial mount
         diff(copy(temp), f);
         expect(events).to.eql([
-          {wU: 0}, {wU: 1}, {wU: 2}, {wA: 4}, {wA: 3}, 
+          {wU: 0}, {wU: 1}, {wU: 2}, {wA: 3}, {wA: 4}, 
           {mWR: 0}, {mWR: 1}, {mWR: 2}, {mWA: 3}, {mWA: 4}
         ])
       })
-      it("should defer rendering new nodes in reverse order until after flush during didUpdate", function(){
+      it("should defer rendering new nodes until after flush during didUpdate", function(){
         const events = [], tracker = new Tracker(events);
         const temp = h(0, null, [
           h(1),
@@ -377,10 +377,10 @@ describe("rebasing (merging a new diff into current diff)", function(){
         diff(copy(temp), f);
         expect(events).to.eql([
           {wU: 0}, {wU: 1}, {wU: 2}, {mWR: 0}, {mWR: 1}, {mWR: 2}, {dU: 2},
-          {wA: 4}, {wA: 3}, {mWA: 3}, {mWA: 4}
+          {wA: 3}, {wA: 4}, {mWA: 3}, {mWA: 4}
         ])
       })
-      it("should immediately render new nodes in reverse order during willAdd", function(){
+      it("should immediately render new nodes during willAdd", function(){
         const events = [], tracker = new Tracker(events);
         const temp = h(0, null, [
           h(1, hooks("willAdd", f => mount(tracker))),
@@ -388,11 +388,11 @@ describe("rebasing (merging a new diff into current diff)", function(){
         ])
         const f = diff(temp, null, tracker);
         expect(events).to.eql([
-          {wA: 0}, {wA: 1}, {wA: 4}, {wA: 3}, {wA: 2}, 
+          {wA: 0}, {wA: 1}, {wA: 3}, {wA: 4}, {wA: 2}, 
           {mWA: 0}, {mWA: 1}, {mWA: 2}, {mWA: 3}, {mWA: 4}
         ])
       })
-      it("should defer adding new nodes in reverse order after flush during didAdd", function(){
+      it("should defer adding new nodes after flush during didAdd", function(){
         const events = [], tracker = new Tracker(events);
         const temp = h(0, null, [
           h(1, hooks("didAdd", f => mount(tracker))),
@@ -401,7 +401,7 @@ describe("rebasing (merging a new diff into current diff)", function(){
         const f = diff(temp, null, tracker);
         expect(events).to.eql([
           {wA: 0}, {wA: 1}, {wA: 2}, {mWA: 0}, {mWA: 1}, {mWA: 2}, {dA: 1},
-          {wA: 4}, {wA: 3}, {mWA: 3}, {mWA: 4},
+          {wA: 3}, {wA: 4}, {mWA: 3}, {mWA: 4},
         ])
       })
     })
@@ -935,7 +935,7 @@ describe("rebasing (merging a new diff into current diff)", function(){
         expect(events).to.eql([
           { wA: 0 }, { mWA: 0 }, 
           {wA: 1}, {wA: 2}, {mWA: 1}, { mWA: 2 },
-          {wA: 8}, {wA: 5}, {wA: 6}, {wA: 7}, {wA: 3}, {wA: 4}, 
+          {wA: 8}, {wA: 3}, {wA: 4}, {wA: 5}, {wA: 6}, {wA: 7}, 
           {mWP: 1}, {mWP: 2}, {mWA: 8}, {mWA: 3}, {mWA: 4}, {mWA: 5}, {mWA:6}, {mWA: 7}
         ])
       })
@@ -1018,7 +1018,7 @@ describe("rebasing (merging a new diff into current diff)", function(){
         expect(renderer2.tree).to.eql(renderer2.renderStatic(h(3, null, h(4))))
         expect(renderer3.tree).to.eql(renderer3.renderStatic(h(5, null, [h(6), h(7)])))
         expect(events).to.eql([
-          {wU: 8}, {wA: 5}, {wA: 6}, {wA: 7}, {wA: 3}, {wA: 4},
+          {wU: 8}, {wA: 3}, {wA: 4}, {wA: 5}, {wA: 6}, {wA: 7},
           {mWP: 1}, {mWP: 2}, {mWR: 8}, {mWA: 3}, {mWA: 4}, {mWA: 5}, {mWA: 6}, {mWA: 7}
         ])
       })
@@ -1652,7 +1652,7 @@ describe("rebasing (merging a new diff into current diff)", function(){
         expect(renderer3.tree).to.eql(renderer3.renderStatic(h(5, null, [h(6), h(7)])))
         expect(events).to.eql([
           {wA: 1}, {wA: 2}, {mWA: 1}, { mWA: 2 },
-          {wA: 8}, {wA: 5}, {wA: 6}, {wA: 7}, {wA: 3}, {wA: 4}, 
+          {wA: 8}, {wA: 3}, {wA: 4}, {wA: 5}, {wA: 6}, {wA: 7}, 
           {mWP: 1}, {mWP: 2}, {mWA: 8}, {mWA: 3}, {mWA: 4}, {mWA: 5}, {mWA:6}, {mWA: 7}
         ])
       })
@@ -1731,7 +1731,7 @@ describe("rebasing (merging a new diff into current diff)", function(){
         expect(renderer2.tree).to.eql(renderer2.renderStatic(h(3, null, h(4))))
         expect(renderer3.tree).to.eql(renderer3.renderStatic(h(5, null, [h(6), h(7)])))
         expect(events).to.eql([
-          {wU: 8}, {wA: 5}, {wA: 6}, {wA: 7}, {wA: 3}, {wA: 4},
+          {wU: 8}, {wA: 3}, {wA: 4}, {wA: 5}, {wA: 6}, {wA: 7},
           {mWP: 1}, {mWP: 2}, {mWR: 8}, {mWA: 3}, {mWA: 4}, {mWA: 5}, {mWA: 6}, {mWA: 7}
         ])
       })

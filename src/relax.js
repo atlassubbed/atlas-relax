@@ -123,6 +123,7 @@ const sib = frame => frame && !isCtx(frame) ? frame : null;
 const laggards = [],
   orphans = [],
   removals = [],
+  adds = [],
   stack = [],
   path = [],
   afterFlush = [],
@@ -454,7 +455,7 @@ const unlinkNode = (frame, parent, prevSib=null, nextSib=frame.sib) => {
 }
 
 // MUTATIONS
-const add = (temp, parent, prevSib, isRoot, isF, evt) => {
+const add = (temp, parent, prevSib, isRoot, shouldImmediatelyQueue, isF, evt) => {
   if (temp){
     isF = isFrame(parent);
     evt = isF ? parent._evt && parent._evt._evt : parent, diffState = LOCK;
@@ -483,7 +484,7 @@ const add = (temp, parent, prevSib, isRoot, isF, evt) => {
       ) :
       pushLeader(temp);
     parent && linkNode(temp, parent, prevSib);
-    isRoot ? laggards.push(temp) : stack.push(temp);
+    shouldImmediatelyQueue ? laggards.push(temp) : adds.push(temp);
     return temp;
   }
 }
@@ -739,11 +740,13 @@ const unmount = (frame=orphans.pop(), isRoot, child, parent, prevSib) => {
     frame = child || orphans.pop();
   }
 }
+const queueLaggards = c => {
+  while(c = adds.pop()) laggards.push(c)
+};
 // mount under a node that has no children
 const mount = (parent, nextChildren, child) => {
   while(child = add(nextChildren.pop(), parent, child));
-  while(child = stack.pop())
-    laggards.push(child);
+  queueLaggards();
 }
 // diff "downwards" from a node
 const subdiff = (parent, child, nextChildren, curChild, nextTemp) => {
@@ -784,6 +787,7 @@ const sidediff = (c, raw=rebasePath(diffState=DIFF)) => {
         context._affs = null;
         raw = context.render(c, context)
         if (context.temp){
+          queueLaggards();
           if (context.rendered && !(context._ph & IN_POST)){
             context._ph += IN_POST;
             afterFlush.push(context);
@@ -798,9 +802,9 @@ const sidediff = (c, raw=rebasePath(diffState=DIFF)) => {
       if (!afterFlush.length)
         return diffState = IDLE, context = null;
       diffState = DIFF;
-      while(context = afterFlush.pop()) if (context.temp){
-        context.rendered && context.rendered(context), context._ph -= IN_POST
-      }
+      while(context = afterFlush.pop()) if (context.temp)
+        context.rendered && context.rendered(context), context._ph -= IN_POST;
+      queueLaggards();
     }
   } while(1);
 }
@@ -823,7 +827,7 @@ const diff = (temp, frame, parent=frame&&frame.prev, prevSib) => {
     if (!Array.isArray(temp = norm(temp))){
       if (!isFrame(frame) || !frame.temp){
         if (temp && (!prevSib || prevSib.par === parent))
-          r = add(temp, parent, sib(prevSib), 1);
+          r = add(temp, parent, sib(prevSib), 1, !prevDiffState);
       } else if (!isCh(frame)){
         if (temp && temp.name === frame.temp.name) {
           if (temp !== frame.temp)
